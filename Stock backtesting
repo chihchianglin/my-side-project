@@ -1,0 +1,124 @@
+import pandas as pd
+
+stock = {
+    "股票代號":[],
+    "損益":[],
+    "損益百分比":[]
+}
+
+df1 = pd.DataFrame(stock)
+
+while True:
+    
+    sid = int(input('輸入股票代號或0結束'))
+    
+    if sid > 0:
+
+        import xlwings as xw
+        
+        #app = xw.App(visible=False, add_book=False)
+
+        #wb = app.books.open(f"{sid}.xlsx")
+        wb = xw.Book(f"{sid}.xlsx")
+        data_sheet = wb.sheets[f"{sid}"]
+
+        
+        df = data_sheet.range("A1").options(pd.DataFrame ,expand="table").value
+
+        df["sma3d"] = df["收盤價"].rolling(3).sum() / 3
+        df["sma5d"] = df["收盤價"].rolling(5).sum() / 5
+        df["sma8d"] = df["收盤價"].rolling(8).sum() / 8
+
+        df["Vsma3d"] = df["成交量"].rolling(3).sum() / 3
+        df["Vsma5d"] = df["成交量"].rolling(5).sum() / 5
+        df["Vsma8d"] = df["成交量"].rolling(8).sum() / 8
+        df["買入"] = 0
+        df["賣出"] = 0
+        df["持有股數"] = 0
+        df["持有資金"] = 300000
+        df["總資產"] = 300000
+
+        data_sheet.range("A1").value = df
+
+        #總資產
+        #last_cell = data_sheet.range("A9").end("right")
+        #last_cell.value = 500000
+
+        last_row = data_sheet.range("A1").end("down").row
+
+        # 實作交易策略
+        for i in range(10, last_row+1):
+            # 截取當天的 3日ma
+            ma3d = data_sheet.range(f"G{i}").value
+            # 截取當天的 5日ma
+            ma5d = data_sheet.range(f"H{i}").value
+            # 截取當天的 8日ma
+            ma8d = data_sheet.range(f"I{i}").value
+
+            # 截取當天的 3日Vma
+            Vma3d = data_sheet.range(f"J{i}").value
+            # 截取當天的 5日Vma
+            Vma5d = data_sheet.range(f"K{i}").value
+            # 截取當天的 8日Vma
+            Vma8d = data_sheet.range(f"L{i}").value
+
+            # 擷取當天的價格
+            price_today = data_sheet.range(f"E{i}").value
+
+
+            # 若 3ma>5ma>8ma 且 3Vma>5Vma>8Vma 而且我有足夠買入以今日收盤價計價的 1000 股的現金，就買入 1000 股
+            if (Vma3d > Vma5d > Vma8d) and (data_sheet.range(f"P{i-1}").value > price_today * 1000):
+                data_sheet.range(f"M{i}").value = 1000
+                data_sheet.range(f"M{i}").color = (255, 0, 0)
+                data_sheet.range(f"E{i}").color = (255, 0, 0)
+            else:
+                data_sheet.range(f"M{i}").value = 0
+
+            #若 5Vma < 8Vma  而且昨天的持有股數大於 1000 股，就賣出 1000 股
+            if (Vma3d < Vma8d ) and (data_sheet.range(f"O{i-1}").value >= 1000):
+                data_sheet.range(f"N{i}").value = 1000
+                data_sheet.range(f"N{i}").color = (0, 255, 0)
+                data_sheet.range(f"E{i}").color = (0, 255, 0)
+            else:
+                data_sheet.range(f"N{i}").value = 0
+
+
+            # 持有股數，算法是前一天的持有股數 + 今天的買入股數 - 今天的賣出股數
+            data_sheet.range(f"O{i}").value = data_sheet.range(f"O{i-1}").value + data_sheet.range(f"M{i}").value - data_sheet.range(f"N{i}").value
+            # 持有資金，算法是前一天的持有資金 + 今日收盤價 x (今天的賣出股數 - 今天的買入股數)
+            data_sheet.range(f"P{i}").value = data_sheet.range(f"P{i-1}").value + price_today * (data_sheet.range(f"N{i}").value - data_sheet.range(f"M{i}").value)
+            # 總資產，算法是今日持有資金 + 今日持有股數 x 今日收盤價 
+            data_sheet.range(f"Q{i}").value = data_sheet.range(f"P{i}").value + data_sheet.range(f"O{i}").value * price_today
+
+        # 收益
+        earn = data_sheet.range("S1").value = data_sheet.range(f"Q{last_row}").value - data_sheet.range("Q2").value
+        earnp = data_sheet.range("S2").value = data_sheet.range("S1").value/data_sheet.range("Q2").value*100
+
+        if data_sheet.range("S1").value > 0:
+            data_sheet.range("S1").color = (255, 0, 0)
+        else:
+            data_sheet.range("S1").color = (0, 255, 0)
+            
+        df1 = df1.append({"股票代號":str(sid), "損益":earn, "損益百分比":int(earnp)}, ignore_index=True)    
+
+        #LINE NOTIFY
+        import requests
+
+        # 只需要把 content 的內容改成你需要傳遞的訊息即可
+        content = f"股票代號:{sid}, 損益:{int(earn)}, 損益百分比:{int(earnp)}"
+
+        line_url = "https://notify-api.line.me/api/notify"
+        token = "PS3GM1fJvSSKfRzPPSZuMd2k5FHUX2lsnJZXVHn8OjV"
+        headers = {
+                "Authorization": "Bearer " + token
+            }
+
+        payload = {'message': content}
+        r = requests.post(line_url, headers = headers, params = payload)
+        
+        continue
+    
+    else:
+        break
+#回傳損益
+df1        
